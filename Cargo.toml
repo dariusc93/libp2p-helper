@@ -2,7 +2,7 @@
 name = "libp2p-helper"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "Apache-2.0 OR MIT"
 description = "A small set of utilities for libp2p"
 repository = "https://github.com/dariusc93/libp2p-helper"
 readme = "README.md"
