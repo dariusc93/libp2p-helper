@@ -2,12 +2,12 @@ use futures::channel::mpsc as channel;
 use futures::stream::{FusedStream, Stream};
 use libp2p::gossipsub::error::PublishError;
 use libp2p::identity::Keypair;
-use tracing::{debug, warn};
 use std::collections::HashMap;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tracing::{debug, warn};
 
 use libp2p::core::{
     connection::{ConnectedPoint, ConnectionId},
@@ -42,7 +42,6 @@ pub struct GossipsubStream {
         channel::UnboundedReceiver<TopicHash>,
     ),
 }
-
 
 /// Stream of a pubsub messages. Implements [`FusedStream`].
 pub struct SubscriptionStream {
@@ -112,12 +111,11 @@ impl From<Gossipsub> for GossipsubStream {
         GossipsubStream {
             streams: HashMap::new(),
             peers: HashMap::new(),
-            gossipsub: gossipsub,
+            gossipsub,
             unsubscriptions: (tx, rx),
         }
     }
 }
-
 
 impl GossipsubStream {
     /// Delegates the `peer_id` over to [`Gossipsub`] and internally only does accounting on

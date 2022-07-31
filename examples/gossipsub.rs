@@ -1,21 +1,16 @@
-
 use futures::stream::StreamExt;
+use libp2p::tcp::GenTcpConfig;
 use libp2p::{
     core::upgrade,
+    gossipsub::GossipsubEvent,
     identity,
     mdns::{Mdns, MdnsEvent},
-    mplex,
-    noise,
+    mplex, noise,
     swarm::{NetworkBehaviourEventProcess, SwarmBuilder, SwarmEvent},
     tcp::TokioTcpTransport,
-    Multiaddr,
-    NetworkBehaviour,
-    PeerId,
-    Transport, gossipsub::{GossipsubEvent},
+    Multiaddr, NetworkBehaviour, PeerId, Transport,
 };
-use libp2p::tcp::GenTcpConfig;
 use libp2p_helper::gossipsub::GossipsubStream;
-use std::error::Error;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[derive(NetworkBehaviour)]
@@ -27,9 +22,7 @@ struct MyBehaviour {
 
 impl NetworkBehaviourEventProcess<GossipsubEvent> for MyBehaviour {
     // Called when `floodsub` produces an event.
-    fn inject_event(&mut self, _: GossipsubEvent) {
-        
-    }
+    fn inject_event(&mut self, _: GossipsubEvent) {}
 }
 
 impl NetworkBehaviourEventProcess<MdnsEvent> for MyBehaviour {
@@ -54,15 +47,13 @@ impl NetworkBehaviourEventProcess<MdnsEvent> for MyBehaviour {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-
     // Create a random PeerId
     let id_keys = identity::Keypair::generate_ed25519();
     let peer_id = PeerId::from(id_keys.public());
     println!("Local peer id: {:?}", peer_id);
 
     // Create a keypair for authenticated encryption of the transport.
-    let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
-        .into_authentic(&id_keys)?;
+    let noise_keys = noise::Keypair::<noise::X25519Spec>::new().into_authentic(&id_keys)?;
 
     // Create a tokio-based TCP transport use noise for authenticated
     // encryption and Mplex for multiplexing of substreams on a TCP stream.
@@ -76,15 +67,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Create a Swarm to manage peers and events.
     let mut swarm = {
-
         //You can also do GossipsubStream::from to import gossipsub
         let gossipsub = libp2p_helper::gossipsub::GossipsubStream::new(id_keys)?;
 
         let mdns = Mdns::new(Default::default()).await?;
-        let behaviour = MyBehaviour {
-            gossipsub,
-            mdns,
-        };
+        let behaviour = MyBehaviour { gossipsub, mdns };
 
         SwarmBuilder::new(transport, behaviour, peer_id)
             // We want the connection background tasks to be spawned
@@ -109,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
     // Subscribe to topic
-    let stream = swarm.behaviour_mut().gossipsub.subscribe(topic.clone()).unwrap();
+    let stream = swarm.behaviour_mut().gossipsub.subscribe(topic).unwrap();
 
     // pin stream
     futures::pin_mut!(stream);
@@ -124,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
             }
             line = stdin.next_line() => {
                 let line = line?.expect("stdin closed");
-                if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), line.as_bytes()) {
+                if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic, line.as_bytes()) {
                     println!("Error publishing message: {}", e);
                 }
             }

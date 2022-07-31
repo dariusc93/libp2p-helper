@@ -104,7 +104,7 @@ impl From<Floodsub> for FloodsubStream {
         FloodsubStream {
             streams: HashMap::new(),
             peers: HashMap::new(),
-            floodsub: floodsub,
+            floodsub,
             unsubscriptions: (tx, rx),
         }
     }
@@ -174,14 +174,18 @@ impl FloodsubStream {
     }
 
     /// See [`Floodsub::publish_many`]
-    pub fn publish_many(&mut self, topic: impl IntoIterator<Item = impl Into<String>>, data: impl Into<Vec<u8>>) {
+    pub fn publish_many(
+        &mut self,
+        topic: impl IntoIterator<Item = impl Into<String>>,
+        data: impl Into<Vec<u8>>,
+    ) {
         let topic = topic.into_iter().map(Topic::new).collect::<Vec<_>>();
         self.floodsub.publish_many(topic, data);
     }
 
     /// See [`Floodsub::publish_any`]
     pub fn publish(&mut self, topic: impl Into<String>, data: impl Into<Vec<u8>>) {
-        self.floodsub.publish_any(Topic::new(topic), data);
+        self.floodsub.publish(Topic::new(topic), data);
     }
 
     /// Returns the known peers subscribed to any topic
