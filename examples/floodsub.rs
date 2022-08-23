@@ -1,8 +1,8 @@
-use futures::stream::StreamExt;
+use futures::StreamExt;
 use libp2p::tcp::GenTcpConfig;
 use libp2p::{
     core::upgrade,
-    gossipsub::GossipsubEvent,
+    floodsub::FloodsubEvent,
     identity,
     mdns::{Mdns, MdnsEvent},
     mplex, noise,
@@ -10,24 +10,25 @@ use libp2p::{
     tcp::TokioTcpTransport,
     Multiaddr, NetworkBehaviour, PeerId, Transport,
 };
-use libp2p_helper::gossipsub::GossipsubStream;
+use libp2p_helper::floodsub::FloodsubStream;
+use std::error::Error;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "MyBehaviourEvent")]
 struct MyBehaviour {
-    gossipsub: GossipsubStream,
+    floodsub: FloodsubStream,
     mdns: Mdns,
 }
 
 enum MyBehaviourEvent {
-    Gossipsub(GossipsubEvent),
+    Floodsub(FloodsubEvent),
     Mdns(MdnsEvent),
 }
 
-impl From<GossipsubEvent> for MyBehaviourEvent {
-    fn from(event: GossipsubEvent) -> Self {
-        MyBehaviourEvent::Gossipsub(event)
+impl From<FloodsubEvent> for MyBehaviourEvent {
+    fn from(event: FloodsubEvent) -> Self {
+        MyBehaviourEvent::Floodsub(event)
     }
 }
 
@@ -37,15 +38,18 @@ impl From<MdnsEvent> for MyBehaviourEvent {
     }
 }
 
+/// The `tokio::main` attribute sets up a tokio runtime.
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
     let id_keys = identity::Keypair::generate_ed25519();
     let peer_id = PeerId::from(id_keys.public());
     println!("Local peer id: {:?}", peer_id);
 
     // Create a keypair for authenticated encryption of the transport.
-    let noise_keys = noise::Keypair::<noise::X25519Spec>::new().into_authentic(&id_keys)?;
+    let noise_keys = noise::Keypair::<noise::X25519Spec>::new()
+        .into_authentic(&id_keys)
+        .expect("Signing libp2p-noise static DH keypair failed.");
 
     // Create a tokio-based TCP transport use noise for authenticated
     // encryption and Mplex for multiplexing of substreams on a TCP stream.
@@ -55,15 +59,21 @@ async fn main() -> anyhow::Result<()> {
         .multiplex(mplex::MplexConfig::new())
         .boxed();
 
+    // Create a Floodsub topic
     let topic = "chat";
+
+    // We create a custom network behaviour that combines floodsub and mDNS.
+    // The derive generates a delegating `NetworkBehaviour` impl which in turn
+    // requires the implementations of `NetworkBehaviourEventProcess` for
+    // the events of each behaviour.
 
     // Create a Swarm to manage peers and events.
     let mut swarm = {
-        //You can also do GossipsubStream::from to import gossipsub
-        let gossipsub = libp2p_helper::gossipsub::GossipsubStream::new(id_keys)?;
-
         let mdns = Mdns::new(Default::default()).await?;
-        let behaviour = MyBehaviour { gossipsub, mdns };
+        let behaviour = MyBehaviour {
+            floodsub: FloodsubStream::new(peer_id),
+            mdns,
+        };
 
         SwarmBuilder::new(transport, behaviour, peer_id)
             // We want the connection background tasks to be spawned
@@ -88,7 +98,11 @@ async fn main() -> anyhow::Result<()> {
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
     // Subscribe to topic
-    let stream = swarm.behaviour_mut().gossipsub.subscribe(topic).unwrap();
+    let stream = swarm
+        .behaviour_mut()
+        .floodsub
+        .subscribe(topic)
+        .unwrap();
 
     // pin stream
     futures::pin_mut!(stream);
@@ -103,9 +117,7 @@ async fn main() -> anyhow::Result<()> {
             }
             line = stdin.next_line() => {
                 let line = line?.expect("stdin closed");
-                if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic, line.as_bytes()) {
-                    println!("Error publishing message: {}", e);
-                }
+                swarm.behaviour_mut().floodsub.publish(topic, line.as_bytes());
             }
             event = swarm.select_next_some() => {
                 match event {
@@ -116,13 +128,13 @@ async fn main() -> anyhow::Result<()> {
                         match event {
                             MdnsEvent::Discovered(list) => {
                                 for (peer, _) in list {
-                                    swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
+                                    swarm.behaviour_mut().floodsub.add_node_to_partial_view(peer);
                                 }
                             }
                             MdnsEvent::Expired(list) => {
                                 for (peer, _) in list {
                                     if !swarm.behaviour_mut().mdns.has_node(&peer) {
-                                        swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer);
+                                        swarm.behaviour_mut().floodsub.remove_node_from_partial_view(&peer);
                                     }
                                 }
                             }
