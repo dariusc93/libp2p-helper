@@ -8,21 +8,22 @@ repository = "https://github.com/dariusc93/libp2p-helper"
 readme = "README.md"
 keywords = ["libp2p", "p2p", "networking"]
 authors = ["Darius Clark"]
-exclude = [ ".gitignore" ]
+exclude = [".gitignore"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libp2p = "0.47"
+libp2p = { version = "0.47", default-features = false }
 futures = "0.3"
 tracing = "0.1"
 anyhow = "1.0"
 parking_lot = "0.12"
+
 [features]
 default = ["floodsub", "gossipsub"]
 floodsub = ["libp2p/floodsub"]
-gossipsub = ["libp2p/floodsub"]
+gossipsub = ["libp2p/gossipsub"]
 
 [dev-dependencies]
-libp2p = { default-features = false, features = ["tcp-tokio"], version = "0.47" }
+libp2p = { features = ["tcp-tokio"], version = "0.47" }
 tokio = { version = "1", features = ["full"] }
