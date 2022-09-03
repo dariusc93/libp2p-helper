@@ -9,4 +9,4 @@ Currently, only floodsub and gossipsub utilities are available to create a strea
 
 ## License
 
-This crate is licensed under MIT.
+This crate is licensed under MIT or Apache 2.0.
