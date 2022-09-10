@@ -31,9 +31,6 @@ pub struct GossipsubStream {
     // Tracks the topic subscriptions.
     streams: HashMap<TopicHash, channel::UnboundedSender<Arc<GossipsubMessage>>>,
 
-    // A collection of peers and the topics they are subscribed to.
-    peers: HashMap<PeerId, Vec<TopicHash>>,
-
     gossipsub: Gossipsub,
     // the subscription streams implement Drop and will send out their topic through the
     // sender cloned from here if they are dropped before the stream has ended.
@@ -41,6 +38,19 @@ pub struct GossipsubStream {
         channel::UnboundedSender<TopicHash>,
         channel::UnboundedReceiver<TopicHash>,
     ),
+}
+
+impl core::ops::Deref for GossipsubStream {
+    type Target = Gossipsub;
+    fn deref(&self) -> &Self::Target {
+        &self.gossipsub
+    }
+}
+
+impl core::ops::DerefMut for GossipsubStream {
+    fn deref_mut(&mut self) -> &mut Gossipsub {
+        &mut self.gossipsub
+    }
 }
 
 /// Stream of a pubsub messages. Implements [`FusedStream`].
@@ -110,7 +120,6 @@ impl From<Gossipsub> for GossipsubStream {
         let (tx, rx) = channel::unbounded();
         GossipsubStream {
             streams: HashMap::new(),
-            peers: HashMap::new(),
             gossipsub,
             unsubscriptions: (tx, rx),
         }
@@ -128,7 +137,6 @@ impl GossipsubStream {
 
         Ok(GossipsubStream {
             streams: HashMap::new(),
-            peers: HashMap::new(),
             gossipsub: Gossipsub::new(MessageAuthenticity::Signed(keypair), config)
                 .map_err(|e| anyhow::anyhow!("{}", e))?,
             unsubscriptions: (tx, rx),
@@ -191,21 +199,15 @@ impl GossipsubStream {
 
     /// Returns the known peers subscribed to any topic
     pub fn known_peers(&self) -> Vec<PeerId> {
-        self.peers.keys().cloned().collect()
+        self.all_peers().map(|(peer, _)| *peer).collect()
     }
 
     /// Returns the peers known to subscribe to the given topic
     pub fn subscribed_peers(&self, topic: &str) -> Vec<PeerId> {
         let topic = Topic::new(topic);
-        self.peers
-            .iter()
-            .filter_map(|(k, v)| {
-                if v.contains(&topic.hash()) {
-                    Some(*k)
-                } else {
-                    None
-                }
-            })
+        self.all_peers()
+            .filter(|(_, list)| list.contains(&&topic.hash()))
+            .map(|(peer_id, _)| *peer_id)
             .collect()
     }
 
@@ -217,14 +219,6 @@ impl GossipsubStream {
             .into_iter()
             .map(|t| t.to_string())
             .collect()
-    }
-
-    pub fn add_explicit_peer(&mut self, peer_id: &PeerId) {
-        self.gossipsub.add_explicit_peer(peer_id);
-    }
-
-    pub fn remove_explicit_peer(&mut self, peer_id: &PeerId) {
-        self.gossipsub.remove_explicit_peer(peer_id);
     }
 }
 
@@ -380,7 +374,7 @@ impl NetworkBehaviour for GossipsubStream {
                     let topic = message.topic.clone();
                     let msg = Arc::new(message);
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(se) = oe.get().unbounded_send(msg.clone()) {
+                        if let Err(se) = oe.get().unbounded_send(msg) {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
@@ -399,17 +393,9 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
-                    self.add_explicit_peer(&peer_id);
-                    let topics = self.peers.entry(peer_id).or_insert_with(Vec::new);
-
-                    let appeared = topics.is_empty();
-
-                    if !topics.contains(&topic) {
-                        topics.push(topic);
-                    }
-
-                    if appeared {
-                        debug!("peer appeared as pubsub subscriber: {}", peer_id);
+                    match self.subscribed_peers(&topic.to_string()).contains(&peer_id) {
+                        true => warn!("Peer is already subscribed to {}", topic),
+                        false => self.add_explicit_peer(&peer_id),
                     }
 
                     continue;
@@ -418,16 +404,9 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
-                    if let Entry::Occupied(mut oe) = self.peers.entry(peer_id) {
-                        let topics = oe.get_mut();
-                        if let Some(pos) = topics.iter().position(|t| t == &topic) {
-                            topics.swap_remove(pos);
-                        }
-                        if topics.is_empty() {
-                            debug!("peer disappeared as pubsub subscriber: {}", peer_id);
-                            oe.remove();
-                            self.remove_explicit_peer(&peer_id);
-                        }
+                    match self.subscribed_peers(&topic.to_string()).contains(&peer_id) {
+                        true => self.remove_explicit_peer(&peer_id),
+                        false => warn!("Peer is not subscribed to {}", topic),
                     }
 
                     continue;
