@@ -31,7 +31,9 @@ pub struct GossipsubStream {
     // Tracks the topic subscriptions.
     streams: HashMap<TopicHash, channel::UnboundedSender<Arc<GossipsubMessage>>>,
 
+    // Gossipsub protocol
     gossipsub: Gossipsub,
+
     // the subscription streams implement Drop and will send out their topic through the
     // sender cloned from here if they are dropped before the stream has ended.
     unsubscriptions: (
@@ -189,6 +191,7 @@ impl GossipsubStream {
         }
     }
 
+    /// Publish to subscribed topic
     pub fn publish(
         &mut self,
         topic: impl Into<String>,
@@ -198,27 +201,27 @@ impl GossipsubStream {
     }
 
     /// Returns the known peers subscribed to any topic
-    pub fn known_peers(&self) -> Vec<PeerId> {
-        self.all_peers().map(|(peer, _)| *peer).collect()
+    pub fn known_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
+        self.all_peers().map(|(peer, _)| *peer)
     }
 
     /// Returns the peers known to subscribe to the given topic
-    pub fn subscribed_peers(&self, topic: &str) -> Vec<PeerId> {
-        let topic = Topic::new(topic);
+    pub fn subscribed_peers(&self, topic: &str) -> impl Iterator<Item = &PeerId> {
+        let topic = Topic::new(topic).hash();
         self.all_peers()
-            .filter(|(_, list)| list.contains(&&topic.hash()))
-            .map(|(peer_id, _)| *peer_id)
-            .collect()
+            .filter(move |(_, list)| list.contains(&&topic))
+            .map(|(peer_id, _)| peer_id)
     }
 
     /// Returns the list of currently subscribed topics. This can contain topics for which stream
     /// has been dropped but no messages have yet been received on the topics after the drop.
-    pub fn subscribed_topics(&self) -> Vec<String> {
-        self.streams
-            .keys()
-            .into_iter()
-            .map(|t| t.to_string())
-            .collect()
+    pub fn subscribed_stream_topics(&self) -> impl Iterator<Item = &TopicHash> {
+        self.streams.keys()
+    }
+
+    /// Returns the list of currently subscribed topics.
+    pub fn subscribed_topics(&self) -> impl Iterator<Item = &TopicHash> {
+        self.gossipsub.topics()
     }
 }
 
@@ -372,9 +375,8 @@ impl NetworkBehaviour for GossipsubStream {
                     message, ..
                 }) => {
                     let topic = message.topic.clone();
-                    let msg = Arc::new(message);
                     if let Entry::Occupied(oe) = self.streams.entry(topic) {
-                        if let Err(se) = oe.get().unbounded_send(msg) {
+                        if let Err(se) = oe.get().unbounded_send(Arc::new(message)) {
                             // receiver has dropped
                             let (topic, _) = oe.remove_entry();
                             debug!("unsubscribing via SendError from {:?}", &topic);
@@ -393,21 +395,30 @@ impl NetworkBehaviour for GossipsubStream {
                     peer_id,
                     topic,
                 }) => {
-                    match self.subscribed_peers(&topic.to_string()).contains(&peer_id) {
-                        true => warn!("Peer is already subscribed to {}", topic),
-                        false => self.add_explicit_peer(&peer_id),
+                    if self
+                        .subscribed_peers(&topic.to_string())
+                        .any(|x| *x == peer_id)
+                    {
+                        warn!("Peer is already subscribed to {}", topic);
+                        continue;
                     }
 
+                    self.add_explicit_peer(&peer_id);
                     continue;
                 }
                 NetworkBehaviourAction::GenerateEvent(GossipsubEvent::Unsubscribed {
                     peer_id,
                     topic,
                 }) => {
-                    match self.subscribed_peers(&topic.to_string()).contains(&peer_id) {
-                        true => self.remove_explicit_peer(&peer_id),
-                        false => warn!("Peer is not subscribed to {}", topic),
-                    }
+                    if !self
+                        .subscribed_peers(&topic.to_string())
+                        .any(|x| *x == peer_id)
+                    {
+                        warn!("Peer is not subscribed to {}", topic);
+                        continue;
+                    };
+
+                    self.remove_explicit_peer(&peer_id);
 
                     continue;
                 }
