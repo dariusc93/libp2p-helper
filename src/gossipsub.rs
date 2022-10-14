@@ -201,27 +201,27 @@ impl GossipsubStream {
     }
 
     /// Returns the known peers subscribed to any topic
-    pub fn known_peers(&self) -> impl Iterator<Item = PeerId> + '_ {
-        self.all_peers().map(|(peer, _)| *peer)
+    pub fn known_peers(&self) -> Vec<PeerId> {
+        self.all_peers().map(|(peer, _)| *peer).collect()
     }
 
     /// Returns the peers known to subscribe to the given topic
-    pub fn subscribed_peers(&self, topic: &str) -> impl Iterator<Item = &PeerId> {
-        let topic = Topic::new(topic).hash();
+    pub fn subscribed_peers(&self, topic: &str) -> Vec<PeerId> {
+        let topic = Topic::new(topic);
         self.all_peers()
-            .filter(move |(_, list)| list.contains(&&topic))
-            .map(|(peer_id, _)| peer_id)
+            .filter(|(_, list)| list.contains(&&topic.hash()))
+            .map(|(peer_id, _)| *peer_id)
+            .collect()
     }
 
     /// Returns the list of currently subscribed topics. This can contain topics for which stream
     /// has been dropped but no messages have yet been received on the topics after the drop.
-    pub fn subscribed_stream_topics(&self) -> impl Iterator<Item = &TopicHash> {
-        self.streams.keys()
-    }
-
-    /// Returns the list of currently subscribed topics.
-    pub fn subscribed_topics(&self) -> impl Iterator<Item = &TopicHash> {
-        self.gossipsub.topics()
+    pub fn subscribed_topics(&self) -> Vec<String> {
+        self.streams
+            .keys()
+            .into_iter()
+            .map(|t| t.to_string())
+            .collect()
     }
 }
 
