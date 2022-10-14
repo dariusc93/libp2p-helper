@@ -397,7 +397,7 @@ impl NetworkBehaviour for GossipsubStream {
                 }) => {
                     if self
                         .subscribed_peers(&topic.to_string())
-                        .any(|x| *x == peer_id)
+                        .contains(&peer_id)
                     {
                         warn!("Peer is already subscribed to {}", topic);
                         continue;
@@ -412,7 +412,7 @@ impl NetworkBehaviour for GossipsubStream {
                 }) => {
                     if !self
                         .subscribed_peers(&topic.to_string())
-                        .any(|x| *x == peer_id)
+                        .contains(&peer_id)
                     {
                         warn!("Peer is not subscribed to {}", topic);
                         continue;

@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
         //You can also do GossipsubStream::from to import gossipsub
         let gossipsub = libp2p_helper::gossipsub::GossipsubStream::new(id_keys)?;
 
-        let mdns = Mdns::new(Default::default()).await?;
+        let mdns = Mdns::new(Default::default())?;
         let behaviour = MyBehaviour { gossipsub, mdns };
 
         SwarmBuilder::new(transport, behaviour, peer_id)
