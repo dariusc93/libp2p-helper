@@ -1,14 +1,15 @@
 use futures::StreamExt;
+use libp2p::swarm::NetworkBehaviour;
 use libp2p::tcp::GenTcpConfig;
 use libp2p::{
     core::upgrade,
     floodsub::FloodsubEvent,
     identity,
-    mdns::{Mdns, MdnsEvent},
+    mdns::{tokio::Behaviour as Mdns, MdnsEvent},
     mplex, noise,
     swarm::{SwarmBuilder, SwarmEvent},
     tcp::TokioTcpTransport,
-    Multiaddr, NetworkBehaviour, PeerId, Transport,
+    Multiaddr, PeerId, Transport,
 };
 use libp2p_helper::floodsub::FloodsubStream;
 use std::error::Error;
