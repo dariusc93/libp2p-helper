@@ -1,6 +1,5 @@
 use futures::channel::mpsc as channel;
 use futures::stream::{FusedStream, Stream};
-use libp2p::core::transport::ListenerId;
 use tracing::debug;
 
 use std::collections::HashMap;
@@ -9,14 +8,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use libp2p::core::{
-    connection::{ConnectedPoint, ConnectionId},
-    Multiaddr, PeerId,
-};
+use libp2p::core::{Multiaddr, PeerId};
 use libp2p::floodsub::{Floodsub, FloodsubConfig, FloodsubEvent, FloodsubMessage, Topic};
-use libp2p::swarm::{
-    ConnectionHandler, DialError, NetworkBehaviour, NetworkBehaviourAction, PollParameters,
-};
+use libp2p::swarm::{NetworkBehaviour, NetworkBehaviourAction, PollParameters, THandlerInEvent};
 
 /// Currently a thin wrapper around Floodsub, perhaps supporting both Gossipsub and Floodsub later.
 /// Allows single subscription to a topic with only unbounded senders. Tracks the peers subscribed
@@ -222,97 +216,84 @@ impl FloodsubStream {
     }
 }
 
-type FloodsubNetworkBehaviourAction = NetworkBehaviourAction<
-    <Floodsub as NetworkBehaviour>::OutEvent,
-    <FloodsubStream as NetworkBehaviour>::ConnectionHandler,
-    <<FloodsubStream as NetworkBehaviour>::ConnectionHandler as ConnectionHandler>::InEvent,
->;
-
 impl NetworkBehaviour for FloodsubStream {
     type ConnectionHandler = <Floodsub as NetworkBehaviour>::ConnectionHandler;
     type OutEvent = FloodsubEvent;
 
-    fn new_handler(&mut self) -> Self::ConnectionHandler {
-        self.floodsub.new_handler()
-    }
-
-    fn addresses_of_peer(&mut self, peer_id: &PeerId) -> Vec<Multiaddr> {
-        self.floodsub.addresses_of_peer(peer_id)
-    }
-
-    fn inject_connection_established(
+    fn handle_established_inbound_connection(
         &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        failed_addresses: Option<&Vec<Multiaddr>>,
-        other_established: usize,
-    ) {
-        self.floodsub.inject_connection_established(
-            peer_id,
+        connection_id: libp2p::swarm::ConnectionId,
+        peer: PeerId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
+        self.floodsub.handle_established_inbound_connection(
             connection_id,
-            endpoint,
-            failed_addresses,
-            other_established,
+            peer,
+            local_addr,
+            remote_addr,
         )
     }
 
-    fn inject_connection_closed(
+    fn handle_established_outbound_connection(
         &mut self,
-        peer_id: &PeerId,
-        connection_id: &ConnectionId,
-        endpoint: &ConnectedPoint,
-        handler: Self::ConnectionHandler,
-        remaining_established: usize,
-    ) {
-        self.floodsub.inject_connection_closed(
-            peer_id,
+        connection_id: libp2p::swarm::ConnectionId,
+        peer: PeerId,
+        addr: &Multiaddr,
+        role_override: libp2p::core::Endpoint,
+    ) -> Result<libp2p::swarm::THandler<Self>, libp2p::swarm::ConnectionDenied> {
+        self.floodsub.handle_established_outbound_connection(
             connection_id,
-            endpoint,
-            handler,
-            remaining_established,
+            peer,
+            addr,
+            role_override,
         )
     }
 
-    fn inject_event(
+    fn handle_pending_inbound_connection(
+        &mut self,
+        connection_id: libp2p::swarm::ConnectionId,
+        local_addr: &Multiaddr,
+        remote_addr: &Multiaddr,
+    ) -> Result<(), libp2p::swarm::ConnectionDenied> {
+        self.floodsub
+            .handle_pending_inbound_connection(connection_id, local_addr, remote_addr)
+    }
+
+    fn handle_pending_outbound_connection(
+        &mut self,
+        connection_id: libp2p::swarm::ConnectionId,
+        maybe_peer: Option<PeerId>,
+        addresses: &[Multiaddr],
+        effective_role: libp2p::core::Endpoint,
+    ) -> Result<Vec<Multiaddr>, libp2p::swarm::ConnectionDenied> {
+        self.floodsub.handle_pending_outbound_connection(
+            connection_id,
+            maybe_peer,
+            addresses,
+            effective_role,
+        )
+    }
+
+    fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm<Self::ConnectionHandler>) {
+        self.floodsub.on_swarm_event(event)
+    }
+
+    fn on_connection_handler_event(
         &mut self,
         peer_id: PeerId,
-        connection: ConnectionId,
-        event: <Self::ConnectionHandler as ConnectionHandler>::OutEvent,
+        connection_id: libp2p::swarm::ConnectionId,
+        event: libp2p::swarm::THandlerOutEvent<Self>,
     ) {
-        self.floodsub.inject_event(peer_id, connection, event)
-    }
-
-    fn inject_dial_failure(
-        &mut self,
-        peer_id: Option<PeerId>,
-        handler: Self::ConnectionHandler,
-        error: &DialError,
-    ) {
-        self.floodsub.inject_dial_failure(peer_id, handler, error)
-    }
-
-    fn inject_new_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.floodsub.inject_new_listen_addr(id, addr)
-    }
-
-    fn inject_expired_listen_addr(&mut self, id: ListenerId, addr: &Multiaddr) {
-        self.floodsub.inject_expired_listen_addr(id, addr)
-    }
-
-    fn inject_new_external_addr(&mut self, addr: &Multiaddr) {
-        self.floodsub.inject_new_external_addr(addr)
-    }
-
-    fn inject_listener_error(&mut self, id: ListenerId, err: &(dyn std::error::Error + 'static)) {
-        self.floodsub.inject_listener_error(id, err)
+        self.floodsub
+            .on_connection_handler_event(peer_id, connection_id, event)
     }
 
     fn poll(
         &mut self,
         ctx: &mut Context,
         poll: &mut impl PollParameters,
-    ) -> Poll<FloodsubNetworkBehaviourAction> {
+    ) -> Poll<NetworkBehaviourAction<libp2p::floodsub::FloodsubEvent, THandlerInEvent<Self>>> {
         use futures::stream::StreamExt;
         use std::collections::hash_map::Entry;
 

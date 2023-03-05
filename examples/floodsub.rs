@@ -1,14 +1,15 @@
 use futures::StreamExt;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::tcp::GenTcpConfig;
+use libp2p::tcp::Config as GenTcpConfig;
+use libp2p::Swarm;
 use libp2p::{
     core::upgrade,
     floodsub::FloodsubEvent,
     identity,
-    mdns::{tokio::Behaviour as Mdns, MdnsEvent},
+    mdns::{tokio::Behaviour as Mdns, Event as MdnsEvent},
     mplex, noise,
-    swarm::{SwarmBuilder, SwarmEvent},
-    tcp::TokioTcpTransport,
+    swarm::SwarmEvent,
+    tcp::tokio::Transport as TokioTcpTransport,
     Multiaddr, PeerId, Transport,
 };
 use libp2p_helper::floodsub::FloodsubStream;
@@ -70,19 +71,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create a Swarm to manage peers and events.
     let mut swarm = {
-        let mdns = Mdns::new(Default::default())?;
+        let mdns = Mdns::new(Default::default(), peer_id)?;
         let behaviour = MyBehaviour {
             floodsub: FloodsubStream::new(peer_id),
             mdns,
         };
 
-        SwarmBuilder::new(transport, behaviour, peer_id)
-            // We want the connection background tasks to be spawned
-            // onto the tokio runtime.
-            .executor(Box::new(|fut| {
-                tokio::spawn(fut);
-            }))
-            .build()
+        Swarm::with_tokio_executor(transport, behaviour, peer_id)
     };
 
     // Reach out to another node if specified
@@ -99,11 +94,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
     // Subscribe to topic
-    let stream = swarm
-        .behaviour_mut()
-        .floodsub
-        .subscribe(topic)
-        .unwrap();
+    let stream = swarm.behaviour_mut().floodsub.subscribe(topic).unwrap();
 
     // pin stream
     futures::pin_mut!(stream);

@@ -1,14 +1,15 @@
 use futures::stream::StreamExt;
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::tcp::GenTcpConfig;
+use libp2p::tcp::Config as GenTcpConfig;
+use libp2p::Swarm;
 use libp2p::{
     core::upgrade,
-    gossipsub::GossipsubEvent,
+    gossipsub::Event as GossipsubEvent,
     identity,
-    mdns::{tokio::Behaviour as Mdns, MdnsEvent},
+    mdns::{tokio::Behaviour as Mdns, Event as MdnsEvent},
     mplex, noise,
-    swarm::{SwarmBuilder, SwarmEvent},
-    tcp::TokioTcpTransport,
+    swarm::{SwarmEvent},
+    tcp::tokio::Transport as TokioTcpTransport,
     Multiaddr, PeerId, Transport,
 };
 use libp2p_helper::gossipsub::GossipsubStream;
@@ -63,16 +64,10 @@ async fn main() -> anyhow::Result<()> {
         //You can also do GossipsubStream::from to import gossipsub
         let gossipsub = libp2p_helper::gossipsub::GossipsubStream::new(id_keys)?;
 
-        let mdns = Mdns::new(Default::default())?;
+        let mdns = Mdns::new(Default::default(), peer_id)?;
         let behaviour = MyBehaviour { gossipsub, mdns };
 
-        SwarmBuilder::new(transport, behaviour, peer_id)
-            // We want the connection background tasks to be spawned
-            // onto the tokio runtime.
-            .executor(Box::new(|fut| {
-                tokio::spawn(fut);
-            }))
-            .build()
+        Swarm::with_tokio_executor(transport, behaviour, peer_id)
     };
 
     // Reach out to another node if specified

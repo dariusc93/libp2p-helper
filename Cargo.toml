@@ -1,6 +1,6 @@
 [package]
 name = "libp2p-helper"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 description = "A small set of utilities for libp2p"
@@ -13,7 +13,7 @@ exclude = [".gitignore"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libp2p = { version = "0.50", default-features = false }
+libp2p = { version = "0.51", default-features = false }
 futures = "0.3"
 tracing = "0.1"
 anyhow = "1.0"
@@ -24,19 +24,5 @@ floodsub = ["libp2p/floodsub"]
 gossipsub = ["libp2p/gossipsub"]
 
 [dev-dependencies]
-libp2p = { features = [
-    "gossipsub",
-    "identify",
-    "tcp",
-    "mplex",
-    "noise",
-    "macros",
-    "ping",
-    "yamux",
-    "dns",
-    "tokio",
-    "mdns",
-    "rsa",
-    "serde",
-], version = "0.50" }
+libp2p = { features = ["full"], version = "0.51" }
 tokio = { version = "1", features = ["full"] }
